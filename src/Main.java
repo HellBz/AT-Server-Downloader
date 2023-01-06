@@ -277,7 +277,7 @@ public class Main {
                             break;
                     }
 
-                System.out.println( mod.optString("file") );
+                System.out.println( "Downloading Mod " + mod.optString("file") );
 
 
 

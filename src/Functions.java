@@ -1,9 +1,13 @@
 import java.io.*;
+import java.net.HttpURLConnection;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.FileSystemNotFoundException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Scanner;
 import java.util.regex.Matcher;
@@ -57,8 +61,8 @@ public class Functions {
             target_path = target_path.replace(Main.fs + Main.fs, Main.fs );
             Path target = Paths.get( target_path );
             try {
-                unzipFolder(source, target);
-                System.out.println("Done");
+                unzipFolder( source , target );
+                System.out.println("UnZip " + file_basename + " Done");
             } catch (IOException e) {
                 //e.printStackTrace();
                 return;
@@ -76,7 +80,29 @@ public class Functions {
     }
 
     public static void download_file(String from, String to) {
-        try (BufferedInputStream in = new BufferedInputStream(new URL(from).openStream());
+
+        HttpURLConnection con = null;
+        try {
+
+            URL url = new URL( from );
+            con = (HttpURLConnection) url.openConnection();
+            con.setRequestMethod("GET");
+            con.setRequestProperty("Host", "hellbz.de");
+            con.setRequestProperty("Connection", "keep-alive");
+            con.setRequestProperty("Accept", "application/json, text/javascript, */*; q=0.01");
+            con.setRequestProperty("X-Requested-With", "XMLHttpRequest");
+            con.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36");
+            con.setRequestProperty("Origin", "http://hellbz.de");
+            con.setRequestProperty("Referer", "https://hellbz.de");
+            con.setRequestProperty("Accept-Encoding", "gzip, deflate, br");
+            con.setRequestProperty("Accept-Language", "en-US,en;q=0.9");
+
+        } catch (IOException e) {
+            Main.textfeld.append("Error" + e.getMessage() + System.lineSeparator());
+            //throw new RuntimeException(e);
+        }
+
+        try (BufferedInputStream in = new BufferedInputStream( con.getInputStream() );
              FileOutputStream fileOutputStream = new FileOutputStream(to)) {
             byte[] dataBuffer = new byte[1024];
             int bytesRead;
@@ -88,81 +114,56 @@ public class Functions {
             Main.textfeld.append("Error" + e.getMessage() + System.lineSeparator());
             //throw new RuntimeException(e);
         }
+
     }
 
-    public static void unzipFolder(Path source, Path target) throws IOException {
+    public static void unzipFolder(Path fileZip, Path target) throws IOException {
 
-        try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(source.toFile().toPath()))) {
+        File destDir = new File( target.toString() + Main.fs );
 
-            // list files in zip
-            ZipEntry zipEntry = zis.getNextEntry();
+        byte[] buffer = new byte[1024];
+        ZipInputStream zis = new ZipInputStream(new FileInputStream( fileZip.toString() ));
+        ZipEntry zipEntry = zis.getNextEntry();
 
-            while (zipEntry != null) {
-
-                boolean isDirectory = false;
-                // example 1.1
-                // some zip stored files and folders separately
-                // e.g data/
-                //     data/folder/
-                //     data/folder/file.txt
-                if (zipEntry.getName().endsWith(File.separator)) {
-                    isDirectory = true;
+        while (zipEntry != null) {
+            File newFile = newFile(destDir, zipEntry);
+            if (zipEntry.isDirectory()) {
+                if (!newFile.isDirectory() && !newFile.mkdirs()) {
+                    throw new IOException("Failed to create directory " + newFile);
+                }
+            } else {
+                // fix for Windows-created archives
+                File parent = newFile.getParentFile();
+                if (!parent.isDirectory() && !parent.mkdirs()) {
+                    throw new IOException("Failed to create directory " + parent);
                 }
 
-                Path newPath = zipSlipProtect(zipEntry, target);
-
-                if (isDirectory) {
-                    Files.createDirectories(newPath);
-                } else {
-
-                    // example 1.2
-                    // some zip stored file path only, need create parent directories
-                    // e.g data/folder/file.txt
-                    if (newPath.getParent() != null) {
-                        if (Files.notExists(newPath.getParent())) {
-                            Files.createDirectories(newPath.getParent());
-                        }
-                    }
-
-                    // copy files, nio
-                    Files.copy(zis, newPath, StandardCopyOption.REPLACE_EXISTING);
-
-                    // copy files, classic
-                    /*try (FileOutputStream fos = new FileOutputStream(newPath.toFile())) {
-                        byte[] buffer = new byte[1024];
-                        int len;
-                        while ((len = zis.read(buffer)) > 0) {
-                            fos.write(buffer, 0, len);
-                        }
-                    }*/
+                // write file content
+                FileOutputStream fos = new FileOutputStream(newFile);
+                int len;
+                while ((len = zis.read(buffer)) > 0) {
+                    fos.write(buffer, 0, len);
                 }
-
-                zipEntry = zis.getNextEntry();
-
+                fos.close();
             }
-            zis.closeEntry();
-
+            zipEntry = zis.getNextEntry();
         }
+
+        zis.closeEntry();
+        zis.close();
 
     }
+    public static File newFile(File destinationDir, ZipEntry zipEntry) throws IOException {
+        File destFile = new File(destinationDir, zipEntry.getName());
 
-    // protect zip slip attack
-    public static Path zipSlipProtect(ZipEntry zipEntry, Path targetDir)
-            throws IOException {
+        String destDirPath = destinationDir.getCanonicalPath();
+        String destFilePath = destFile.getCanonicalPath();
 
-        // test zip slip vulnerability
-        // Path targetDirResolved = targetDir.resolve("../../" + zipEntry.getName());
-
-        Path targetDirResolved = targetDir.resolve(zipEntry.getName());
-
-        // make sure normalized file still has targetDir as its prefix
-        // else throws exception
-        Path normalizePath = targetDirResolved.normalize();
-        if (!normalizePath.startsWith(targetDir)) {
-            throw new IOException("Bad zip entry: " + zipEntry.getName());
+        if (!destFilePath.startsWith(destDirPath + Main.fs )) {
+            throw new IOException("Entry is outside of the target dir: " + zipEntry.getName());
         }
 
-        return normalizePath;
+        return destFile;
     }
 
     public static String file_get_contents(String url) {
