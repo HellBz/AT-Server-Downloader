@@ -1,0 +1,12 @@
+biomesoplenty
+aquatweaks
+battletext
+betterfps
+custommainmenu
+dynamicsurroundings
+dynamiclights
+resourceloader
+optifine
+oculus
+legendarytooltips
+zyinshud
